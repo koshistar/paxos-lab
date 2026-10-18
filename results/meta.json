@@ -1,0 +1,10 @@
+{
+  "generated_at": "2026-10-19 01:26:11",
+  "python": "3.13.9",
+  "platform": "Windows 11",
+  "machine": "AMD64",
+  "processor": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+  "cases": 52,
+  "faults": 8,
+  "note": "Windows 上系统定时器精度约 15.6ms，本工程用 paxos/timer.py 的混合 sleep 补偿；RTT=1ms 档实测仍会略高（约 1.5~3ms）。Linux/Docker 下更接近设定值。"
+}

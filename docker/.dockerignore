@@ -1,0 +1,18 @@
+# 构建上下文是工程根目录，把不必要的东西挡在外面，镜像更小、构建更快
+.git
+.gitignore
+data
+run
+results
+docs
+screenshots
+tests
+experiments
+scripts
+*.md
+!README.md
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.venv

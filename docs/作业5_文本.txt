@@ -1,0 +1,84 @@
+《云计算技术》课程作业（作业5 原文，便于检索）
+
+项目            内容
+课程名称        云计算技术
+作业性质        个人独立完成（不接受小组合作）
+截止日期        10月20日23：59
+提交形式        实验报告（Word/PDF）+ 配套工程文件压缩包
+评分方式        过程性考核，重点考察差异化比较与独立分析能力
+题目            Chubby 类开源项目分析 + Paxos 协议重实现与性能临界点实验
+
+一、任务
+1. 找一个类似 Google Chubby 的开源项目，如 ZooKeeper、etcd、Consul、Doozer、PhxPaxos。
+2. 拉取源码，分析软件架构和关键代码。
+3. 自己重写一套 Paxos 协议原型，不能直接调用现成 Paxos/Raft 库。
+4. 用 3～4 台虚拟 Linux 或 Docker 节点，实现 Proposer、Acceptor、Learner、Listener 等角色。
+5. 节点之间用 TCP 自定义报文通信。
+6. 对比不同提案机制的性能，如 Basic Paxos、Multi-Paxos、Fast Paxos。
+7. 做故障、延迟、丢包、并发实验，分析 Paxos 的性能拐点和临界点。
+8. 写实验报告。
+
+二、环境
+- 3～4 台 Ubuntu 虚拟机，或 Docker 容器。
+- 固定 IP，开放端口。
+- 每节点可同时承担 Proposer、Acceptor、Learner。
+- 可加 Listener/Observer，只学习结果，不参与投票。
+- Acceptor 必须持久化 promised_id、accepted_id、accepted_value。
+
+三、Paxos 实现要求
+至少实现：
+- Prepare / Promise
+- Accept / Accepted
+- Learn
+- 多数派确认
+- 提案编号单调递增
+- 超时重试
+- 崩溃恢复
+至少再实现一种优化：
+- Multi-Paxos：稳定 Leader 后跳过 Prepare
+- Fast Paxos：减少一轮 RTT
+- 批处理
+- 租约/心跳
+
+四、实验内容
+对比：
+- Basic Paxos / Multi-Paxos / Fast Paxos
+- 3 节点 / 4 节点
+- 并发提案数
+- 网络 RTT：1ms / 10ms / 50ms / 100ms
+- 丢包率：0 / 1% / 5% / 10%
+- kill Acceptor、kill Leader、网络分区
+- fsync 开 / 关
+观测：
+- P50、P95、P99 延迟
+- 吞吐
+- 消息数
+- 冲突率
+- 恢复时间
+- 是否出现两个 Learner 学到不同值
+
+五、临界点分析
+报告必须回答：
+1. 3、4、5 节点多数派和容错能力。
+2. 为什么 4 节点不一定比 3 节点好。
+3. Basic Paxos 何时活锁。
+4. Multi-Paxos 有 Leader 为什么快，Leader 故障恢复多久。
+5. Fast Paxos 冲突率多高时反而变慢。
+6. RTT 和丢包到多少时吞吐崩溃。
+7. 故障几个节点后系统不可用。
+8. 是否始终保证安全性。
+
+六、提交
+- 代码 + README + 启动脚本。
+- 开源项目架构分析。
+- 实验报告。
+- 原始数据 CSV/JSON。
+
+七、评分
+- 开源项目分析：20%
+- Paxos 实现：35%
+- 多节点部署：20%
+- 实验与临界点：25%
+
+八、参考
+Chubby 论文、Paxos Made Simple、Paxos Made Live、Fast Paxos、ZooKeeper、etcd、Doozer、PhxPaxos。

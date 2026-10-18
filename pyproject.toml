@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paxos-lab"
+version = "1.0.0"
+description = "《云计算技术》作业5：Paxos 协议重实现与性能临界点实验（纯标准库，无第三方依赖）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "云计算技术课程作业" }]
+keywords = ["paxos", "distributed-systems", "consensus", "teaching"]
+dependencies = []
+
+[project.optional-dependencies]
+# 只有"分析 + 出图"才需要，跑协议本身不需要任何第三方库
+analysis = ["pandas>=2.0", "matplotlib>=3.7"]
+
+[project.scripts]
+paxos-lab = "paxos.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["paxos*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = ["data", "run", "results", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RET", "ARG", "PTH", "RUF"]
+ignore = [
+  "ARG002",  # 未使用的关键字参数（回调签名需要）
+  "RUF001",  # 中文标点被误判为"易混淆字符"
+  "RUF002",
+  "RUF003",
+  "RUF012",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001", "ARG002"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

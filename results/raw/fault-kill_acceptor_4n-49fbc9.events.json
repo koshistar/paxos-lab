@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "at_s": 2.5,
+      "action": "kill",
+      "node": "n2",
+      "detail": "kill -9 n2"
+    },
+    {
+      "at_s": 7.0,
+      "action": "restart",
+      "node": "n2",
+      "detail": "restart n2"
+    }
+  ],
+  "scenario": "kill_acceptor_4n"
+}

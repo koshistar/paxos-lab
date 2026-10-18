@@ -1,0 +1,154 @@
+# 4 节点 Paxos 集群（固定 IP + 独立数据卷 + 可注入内核级网络时延）
+#
+#   docker compose -f docker/docker-compose.yml up -d --build
+#   docker compose -f docker/docker-compose.yml ps
+#   docker compose -f docker/docker-compose.yml logs -f paxos-n1
+#   docker compose -f docker/docker-compose.yml down -v
+#
+# 想换协议/参数，用环境变量覆盖（不用改文件）：
+#   $env:PAXOS_PROTOCOL="fast"; $env:PAXOS_FSYNC="off"; docker compose ... up -d
+
+name: paxos-lab
+
+x-common: &common
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: paxos-lab:1.0
+  restart: unless-stopped
+  cap_add:
+    - NET_ADMIN            # 允许在容器里用 tc netem 注入内核级时延/丢包
+  environment:
+    PYTHONUNBUFFERED: "1"
+    PYTHONUTF8: "1"
+  networks:
+    paxos-net: {}
+
+networks:
+  paxos-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+          gateway: 172.28.0.1
+
+services:
+  n1:
+    <<: *common
+    container_name: paxos-n1
+    hostname: n1
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      ADMIN_PORT: "8001"
+    command:
+      - node
+      - --id=n1
+      - --host=0.0.0.0
+      - --peers=n1=172.28.0.11:7001,n2=172.28.0.12:7001,n3=172.28.0.13:7001,n4=172.28.0.14:7001
+      - --port=7001
+      - --admin-port=8001
+      - --data-dir=/data
+      - --protocol=${PAXOS_PROTOCOL:-multipaxos}
+      - --fsync=${PAXOS_FSYNC:-on}
+      - --rtt-ms=${PAXOS_RTT_MS:-1}
+      - --loss=${PAXOS_LOSS:-0}
+      - --batch-ms=${PAXOS_BATCH_MS:-0}
+    networks:
+      paxos-net:
+        ipv4_address: 172.28.0.11
+    ports:
+      - "7001:7001"
+      - "8001:8001"
+    volumes:
+      - ../data/docker/n1:/data
+
+  n2:
+    <<: *common
+    container_name: paxos-n2
+    hostname: n2
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      ADMIN_PORT: "8002"
+    command:
+      - node
+      - --id=n2
+      - --host=0.0.0.0
+      - --peers=n1=172.28.0.11:7001,n2=172.28.0.12:7001,n3=172.28.0.13:7001,n4=172.28.0.14:7001
+      - --port=7001
+      - --admin-port=8001
+      - --data-dir=/data
+      - --protocol=${PAXOS_PROTOCOL:-multipaxos}
+      - --fsync=${PAXOS_FSYNC:-on}
+      - --rtt-ms=${PAXOS_RTT_MS:-1}
+      - --loss=${PAXOS_LOSS:-0}
+      - --batch-ms=${PAXOS_BATCH_MS:-0}
+    networks:
+      paxos-net:
+        ipv4_address: 172.28.0.12
+    ports:
+      - "7002:7001"
+      - "8002:8001"
+    volumes:
+      - ../data/docker/n2:/data
+
+  n3:
+    <<: *common
+    container_name: paxos-n3
+    hostname: n3
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      ADMIN_PORT: "8003"
+    command:
+      - node
+      - --id=n3
+      - --host=0.0.0.0
+      - --peers=n1=172.28.0.11:7001,n2=172.28.0.12:7001,n3=172.28.0.13:7001,n4=172.28.0.14:7001
+      - --port=7001
+      - --admin-port=8001
+      - --data-dir=/data
+      - --protocol=${PAXOS_PROTOCOL:-multipaxos}
+      - --fsync=${PAXOS_FSYNC:-on}
+      - --rtt-ms=${PAXOS_RTT_MS:-1}
+      - --loss=${PAXOS_LOSS:-0}
+      - --batch-ms=${PAXOS_BATCH_MS:-0}
+    networks:
+      paxos-net:
+        ipv4_address: 172.28.0.13
+    ports:
+      - "7003:7001"
+      - "8003:8001"
+    volumes:
+      - ../data/docker/n3:/data
+
+  n4:
+    <<: *common
+    container_name: paxos-n4
+    hostname: n4
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      ADMIN_PORT: "8004"
+    command:
+      - node
+      - --id=n4
+      - --host=0.0.0.0
+      - --peers=n1=172.28.0.11:7001,n2=172.28.0.12:7001,n3=172.28.0.13:7001,n4=172.28.0.14:7001
+      - --port=7001
+      - --admin-port=8001
+      - --data-dir=/data
+      - --protocol=${PAXOS_PROTOCOL:-multipaxos}
+      - --fsync=${PAXOS_FSYNC:-on}
+      - --rtt-ms=${PAXOS_RTT_MS:-1}
+      - --loss=${PAXOS_LOSS:-0}
+      - --batch-ms=${PAXOS_BATCH_MS:-0}
+    networks:
+      paxos-net:
+        ipv4_address: 172.28.0.14
+    ports:
+      - "7004:7001"
+      - "8004:8001"
+    volumes:
+      - ../data/docker/n4:/data

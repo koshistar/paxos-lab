@@ -1,0 +1,29 @@
+{
+  "events": [
+    {
+      "at_s": 2.5,
+      "action": "kill",
+      "node": "n2",
+      "detail": "kill -9 n2"
+    },
+    {
+      "at_s": 3.5,
+      "action": "kill",
+      "node": "n3",
+      "detail": "kill -9 n3"
+    },
+    {
+      "at_s": 8.0,
+      "action": "restart",
+      "node": "n2",
+      "detail": "restart n2"
+    },
+    {
+      "at_s": 8.0,
+      "action": "restart",
+      "node": "n3",
+      "detail": "restart n3"
+    }
+  ],
+  "scenario": "kill_two_acceptors_4n"
+}

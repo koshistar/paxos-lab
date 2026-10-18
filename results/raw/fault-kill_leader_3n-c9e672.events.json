@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "at_s": 2.5,
+      "action": "kill",
+      "node": "n1",
+      "detail": "kill -9 n1"
+    },
+    {
+      "at_s": 8.0,
+      "action": "restart",
+      "node": "n1",
+      "detail": "restart n1"
+    }
+  ],
+  "scenario": "kill_leader_3n"
+}

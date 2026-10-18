@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "at_s": 2.5,
+      "action": "partition",
+      "node": "",
+      "detail": "n1,n2 | n3,n4,n5"
+    },
+    {
+      "at_s": 7.5,
+      "action": "heal",
+      "node": "",
+      "detail": "恢复全部链路"
+    }
+  ],
+  "scenario": "partition_minority_5n"
+}
