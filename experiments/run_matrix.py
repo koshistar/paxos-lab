@@ -239,6 +239,9 @@ def spec_for(case: Case, base_port: int) -> ClusterSpec:
         batch_ms=case.batch_ms,
         data_root=Path("data/matrix"),
         log_root=Path("run/matrix-logs"),
+        # 实验矩阵自己起自己停，不要覆盖 run/cluster.json，
+        # 否则跑完之后用户执行 status 会看到一堆 DOWN 的"幽灵节点"
+        publish_state=False,
     )
 
 
@@ -561,6 +564,7 @@ def main(argv: list[str] | None = None) -> int:
                 rtt_ms=fault.rtt_ms,
                 data_root=Path("data/matrix"),
                 log_root=Path("run/matrix-logs"),
+                publish_state=False,
             )
             cluster = Cluster(spec)
             print(f"\n[故障] {fault.name}  {fault.description}")

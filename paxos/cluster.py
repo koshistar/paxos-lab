@@ -68,6 +68,11 @@ class ClusterSpec:
     listeners: int = 0
     extra_args: list[str] = field(default_factory=list)
     keep_data: bool = False
+    #: 是否把集群状态写进 ``run/cluster.json``。
+    #: 只有 ``up`` 命令需要（让另一个终端里的 status / bench / down 能找到集群）；
+    #: smoke、实验矩阵这些"自己起自己停"的临时集群必须关掉，否则会留下幽灵状态，
+    #: 让用户之后执行 status 时看到一堆 DOWN 节点。
+    publish_state: bool = True
 
     def ids(self) -> list[str]:
         return [f"n{i + 1}" for i in range(self.nodes + self.listeners)]
@@ -145,7 +150,8 @@ class Cluster:
             self._spawn(ep, is_listener=is_listener)
         if wait:
             self.wait_ready(timeout=timeout)
-        self.write_state()
+        if self.spec.publish_state:
+            self.write_state()
 
     def _spawn(self, ep: NodeEndpoint, *, is_listener: bool = False) -> None:
         log_path = self.spec.log_root / f"{ep.node_id}.log"
@@ -262,6 +268,21 @@ class Cluster:
             except subprocess.TimeoutExpired:
                 self._kill(proc)
         self.procs.clear()
+        if self.spec.publish_state:
+            self.clear_state()
+
+    def clear_state(self) -> None:
+        """删掉 ``run/cluster.json``（只删"自己写的"那份，避免踩到别的集群）。"""
+        path = Path(STATE_FILE)
+        state = Cluster.load_state()
+        if state is None:
+            return
+        mine = {ep.node_id for ep in self.endpoints}
+        theirs = {item.get("id") for item in state.get("endpoints", [])}
+        if mine and mine != theirs:
+            return
+        with contextlib.suppress(OSError):
+            path.unlink(missing_ok=True)
 
     def _kill(self, proc: subprocess.Popen[bytes]) -> None:
         try:
@@ -421,5 +442,5 @@ class Cluster:
         eps = [
             NodeEndpoint(node_id=nid, host=host, port=port, admin_port=admin) for nid, host, port, admin in endpoints
         ]
-        spec = ClusterSpec(nodes=len(eps), protocol=protocol, keep_data=True)
+        spec = ClusterSpec(nodes=len(eps), protocol=protocol, keep_data=True, publish_state=False)
         return Cluster(spec, eps)

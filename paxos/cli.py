@@ -263,6 +263,10 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
     print_status_table(cluster)
     statuses = cluster.status_all()
+    if statuses and not any(s.get("ok") for s in statuses.values()):
+        print("\n⚠ 状态文件里的节点全部不可达：集群可能已经退出（或端口被防火墙挡住）。")
+        print("   清理残留状态：python -m paxos.cli down")
+        return 1
     leaders = {status.get("leader") for status in statuses.values() if status.get("leader")}
     if len(leaders) > 1:
         print(f"\n⚠ 检测到多个 Leader 声明: {leaders} （Paxos 允许暂时多主，最终只有一个能提交）")
@@ -416,6 +420,7 @@ def cmd_smoke(args: argparse.Namespace) -> int:
             rtt_ms=1.0,
             data_root=Path("data/smoke"),
             log_root=Path("run/smoke-logs"),
+            publish_state=False,  # 临时集群，不要覆盖 run/cluster.json
         )
         cluster = Cluster(spec)
         try:
@@ -454,6 +459,7 @@ def cmd_smoke(args: argparse.Namespace) -> int:
         fsync=True,
         data_root=Path("data/smoke"),
         log_root=Path("run/smoke-logs"),
+        publish_state=False,
     )
     cluster = Cluster(spec)
     try:
