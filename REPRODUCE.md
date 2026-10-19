@@ -1,6 +1,6 @@
 # 复现指南
 
-> 目标：任何人（包括助教）在你的机器或自己的机器上，**用 3 条命令、约 15 分钟**
+> 目标：任何人在你的机器或自己的机器上，**用 3 条命令、约 15 分钟**
 > 复现 `results/` 里的全部数据与图表。
 
 ---
@@ -76,7 +76,7 @@ python -m experiments.analyze      # 表 9（临界点速查）总是会生成
 
 ---
 
-## 3. 手工复现单个用例（答辩演示用，30 秒）
+## 3. 手工复现单个用例
 
 ```powershell
 # 终端 A
@@ -95,7 +95,7 @@ python -m paxos.cli down
 
 ---
 
-## 4. Docker 四节点复现（作业"多节点部署"部分）
+## 4. Docker 四节点复现
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\02-docker.ps1 -Action up

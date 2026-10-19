@@ -145,13 +145,19 @@ def cmd_up(args: argparse.Namespace) -> int:
     cluster = Cluster(spec)
     print(f"正在启动 {args.nodes} 节点集群（protocol={args.protocol}, fsync={args.fsync}) ...")
     cluster.start()
-    print_quorum_table(args.nodes)
-    print_status_table(cluster)
-    print("\n集群已就绪。常用命令（在**另一个**终端执行）：")
-    print("  python -m paxos.cli status")
-    print("  python -m paxos.cli bench -c 8 -d 10")
-    print("  python -m paxos.cli down")
-    print("\n保持本终端不要关闭；按 Ctrl+C 结束集群。")
+    try:
+        print_quorum_table(args.nodes)
+        print_status_table(cluster)
+        print("\n集群已就绪。常用命令（在**另一个**终端执行）：")
+        print("  python -m paxos.cli status")
+        print("  python -m paxos.cli bench -c 8 -d 10")
+        print("  python -m paxos.cli down")
+        print("\n保持本终端不要关闭；按 Ctrl+C 结束集群。")
+    except Exception:
+        # 打印/展示出错时**必须**把刚拉起来的集群收掉，否则会留下一堆占端口的孤儿进程
+        print("\n[错误] 打印集群状态失败，正在回收已启动的节点 ...")
+        cluster.stop()
+        raise
     try:
         while True:
             time.sleep(0.5)
@@ -193,34 +199,61 @@ def print_quorum_table(nodes: int) -> None:
     print("  （记住这两个数：n=4 和 n=3 的容错能力一样，都是 1 台）\n")
 
 
+#: 状态表的列定义（列名, 显示宽度）。中文在终端里占两列，所以按"显示宽度"而不是字符数对齐。
+STATUS_COLUMNS: tuple[tuple[str, int], ...] = (
+    ("节点", 8),
+    ("角色", 10),
+    ("Leader", 8),
+    ("已学slot", 10),
+    ("已应用", 8),
+    ("轮次", 6),
+    ("选举", 6),
+    ("消息(发/丢)", 16),
+)
+
+
+def display_width(text: str) -> int:
+    """字符串在等宽终端里占多少列（中日韩全角字符按 2 列算）。"""
+    import unicodedata
+
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
+
+
+def pad_display(value: object, width: int) -> str:
+    """按显示宽度左对齐补空格。
+
+    不用 f-string 的 ``:<width`` 格式说明符，是为了避免"宽度写成变量"时
+    掉进 ``Invalid format specifier`` 的坑（本工程真踩过：一个手误让
+    ``up`` 在集群已经拉起来之后崩掉，留下 3 个孤儿进程）。
+    """
+    text = str(value)
+    return text + " " * max(0, width - display_width(text))
+
+
 def print_status_table(cluster: Cluster) -> None:
     statuses = cluster.status_all()
-    columns = [
-        ("节点", 6),
-        ("角色", 10),
-        ("Leader", 8),
-        ("已学slot", 10),
-        ("已应用", 8),
-        ("轮次", 6),
-        ("选举", 6),
-        ("消息(发/丢)", 16),
-    ]
-    header = "".join(f"{title:<width}" for title, width in columns)
-    print(header)
-    print("-" * len(header))
+    widths = [width for _title, width in STATUS_COLUMNS]
+    header = "".join(pad_display(title, width) for title, width in STATUS_COLUMNS)
+    print(header.rstrip())
+    print("-" * sum(widths))
     for node_id, status in statuses.items():
         if not status.get("ok"):
-            print(f"{node_id:<6}{'DOWN':<10}")
+            print(pad_display(node_id, widths[0]) + "DOWN（进程不在或端口不通）")
             continue
         learner = status.get("learner", {})
         messages = status.get("messages", {})
         counters = status.get("counters", {})
-        print(
-            f"{node_id:<6}{status.get('role', ''):<10}{status.get('leader') or '-'!s:<8}"
-            f"{learner.get('chosen_slots', 0):<10}{status.get('applied_index', -1):<8}"
-            f"{status.get('max_round', 0):<6}{counters.get('elections', 0):<6}"
-            f"{messages.get('sent', 0)}/{messages.get('dropped', 0):<6}"
-        )
+        cells = [
+            node_id,
+            status.get("role", ""),
+            status.get("leader") or "-",
+            learner.get("chosen_slots", 0),
+            status.get("applied_index", -1),
+            status.get("max_round", 0),
+            counters.get("elections", 0),
+            f"{messages.get('sent', 0)}/{messages.get('dropped', 0)}",
+        ]
+        print("".join(pad_display(cell, width) for cell, width in zip(cells, widths, strict=False)).rstrip())
 
 
 def cmd_status(args: argparse.Namespace) -> int:
