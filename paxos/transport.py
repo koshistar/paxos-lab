@@ -31,8 +31,14 @@ from .timer import sleep_precise
 
 log = logging.getLogger(__name__)
 
-#: 单行报文上限，防止异常输入打爆内存
+#: 单行报文上限。Paxos 报文通常只有几百字节，4 MiB 是"正常永远不会碰到"的上限；
+#: 真的碰到说明有消息在无界增长（本工程踩过：全局 Phase 1 应答把整本日志都带上，
+#: 崩溃前大约是 170 KB，正好越过 asyncio 默认的 64 KiB 行上限）。
 MAX_LINE = 4 * 1024 * 1024
+
+#: admin 口的上限给得更大：``dump_log`` 会把整个决定日志一次性吐出来（安全性比对用），
+#: 长跑之后可能有几万个 slot。admin 口只监听本机/容器网段，风险可控。
+MAX_ADMIN_LINE = 64 * 1024 * 1024
 #: 链路断开后的重连间隔（秒）
 RECONNECT_INTERVAL = 0.2
 
@@ -262,7 +268,7 @@ class PeerLink:
             if writer is None or writer.is_closing():
                 try:
                     reader, new_writer = await asyncio.wait_for(
-                        asyncio.open_connection(self.addr[0], self.addr[1]), timeout=2.0
+                        asyncio.open_connection(self.addr[0], self.addr[1], limit=MAX_LINE), timeout=2.0
                     )
                 except (OSError, asyncio.TimeoutError):
                     await asyncio.sleep(RECONNECT_INTERVAL)

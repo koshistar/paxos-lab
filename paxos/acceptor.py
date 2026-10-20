@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from .ballot import Ballot, later
@@ -35,14 +35,27 @@ log = logging.getLogger(__name__)
 #: Prepare 中 ins 取该值表示"作用于所有实例"（Multi-Paxos 的 Phase 1 优化）
 ALL_INSTANCES = -1
 
+#: 全局 Phase 1 应答里最多回报多少条"未决"实例。
+#: 这是防止单条消息无界增长的硬上限（正常情况只有 0~个位数条）。
+MAX_REPORTED_INSTANCES = 1024
+
 
 class Acceptor:
     """单个节点的 Acceptor 角色。"""
 
-    def __init__(self, node_id: str, journal: Journal, *, fsync: bool) -> None:
+    def __init__(
+        self,
+        node_id: str,
+        journal: Journal,
+        *,
+        fsync: bool,
+        is_decided: Callable[[int], bool] | None = None,
+    ) -> None:
         self.node_id = node_id
         self.journal = journal
         self.fsync = fsync
+        #: 判断某个 slot 是否已经被本地 Learner 选定 —— 已选定的不用再回报
+        self._is_decided: Callable[[int], bool] = is_decided or (lambda _slot: False)
 
         self.promised_all: Ballot | None = None
         self.promised: dict[int, Ballot] = {}
@@ -108,8 +121,28 @@ class Acceptor:
                 }
             self.promised_all = ballot
             await self._persist({"k": "pa", "b": ballot.to_list()})
-            # 把"编号比新提案旧"的已接受值统统回报，供 Leader 回填历史决定
-            reported = [[i, b.to_list(), v] for i, (b, v) in sorted(self.accepted.items()) if b < ballot]
+            # 只回报"编号比新提案旧、且我还没学到它已被选定"的条目。
+            #
+            # 为什么要加这个过滤：一开始这里回报**全部**已接受条目，跑久了就会
+            # 撑爆单条消息 —— 实测 2889 个 slot 时这条应答约 170 KB，超过 asyncio
+            # StreamReader 默认 64 KiB 的行上限，对端 `readline()` 直接抛
+            # `ValueError: Separator is not found, and chunk exceed the limit`，
+            # 读循环死掉、链路断开、集群再也选不出 Leader。
+            # 已经被 Learner 学到的 slot 不需要回报（Leader 通过缺口回填就能拿到），
+            # 过滤掉它们之后，应答长度只和"真正未决的 slot 数"成正比（通常个位数）。
+            reported = [
+                [i, b.to_list(), v]
+                for i, (b, v) in sorted(self.accepted.items())
+                if b < ballot and not self._is_decided(i)
+            ]
+            if len(reported) > MAX_REPORTED_INSTANCES:
+                log.warning(
+                    "[%s] 未决实例过多（%d 个），本次只回报最近 %d 个",
+                    self.node_id,
+                    len(reported),
+                    MAX_REPORTED_INSTANCES,
+                )
+                reported = reported[-MAX_REPORTED_INSTANCES:]
             return {"ok": True, "promised": ballot.to_list(), "accepted": reported}
 
         current = self.promised.get(ins)

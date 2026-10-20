@@ -5,12 +5,25 @@
 #   docker compose -f docker/docker-compose.yml logs -f paxos-n1
 #   docker compose -f docker/docker-compose.yml down -v
 #
+# ── 端口规划（动之前先看这里）───────────────────────────────────────────────
+#   容器内部：Paxos 口统一 7001，管理口统一 8001（四个容器完全一样，
+#            彼此靠固定 IP 172.28.0.11~14 区分）
+#   宿主机映射：
+#     Paxos  7001→n1  7002→n2  7003→n3  7004→n4
+#     admin  8101→n1  8102→n2  8103→n3  8104→n4
+#
+#   为什么 admin 用 8101 而不是 8001：作业4 的 game-leaderboard 用了
+#   8000/8001/3306/6379，同时启动会撞端口（实测报
+#   "Bind for 0.0.0.0:8001 failed: port is already allocated"）。
+#   想用 8001~8004 的话，先把作业4 的容器停掉：
+#     docker stop game-rank game-gateway game-redis game-mysql
+#
 # 想换协议/参数，用环境变量覆盖（不用改文件）：
 #   $env:PAXOS_PROTOCOL="fast"; $env:PAXOS_FSYNC="off"; docker compose ... up -d
 
 name: paxos-lab
 
-x-common: &common
+x-paxos: &paxos
   build:
     context: ..
     dockerfile: docker/Dockerfile
@@ -21,8 +34,19 @@ x-common: &common
   environment:
     PYTHONUNBUFFERED: "1"
     PYTHONUTF8: "1"
-  networks:
-    paxos-net: {}
+  # 四个容器共用同一串 peer 地址（容器内部端口都是 7001）
+  command:
+    - node
+    - --host=0.0.0.0
+    - --peers=n1=172.28.0.11:7001,n2=172.28.0.12:7001,n3=172.28.0.13:7001,n4=172.28.0.14:7001
+    - --port=7001
+    - --admin-port=8001
+    - --data-dir=/data
+    - --protocol=${PAXOS_PROTOCOL:-multipaxos}
+    - --fsync=${PAXOS_FSYNC:-on}
+    - --rtt-ms=${PAXOS_RTT_MS:-1}
+    - --loss=${PAXOS_LOSS:-0}
+    - --batch-ms=${PAXOS_BATCH_MS:-0}
 
 networks:
   paxos-net:
@@ -34,13 +58,9 @@ networks:
 
 services:
   n1:
-    <<: *common
+    <<: *paxos
     container_name: paxos-n1
     hostname: n1
-    environment:
-      PYTHONUNBUFFERED: "1"
-      PYTHONUTF8: "1"
-      ADMIN_PORT: "8001"
     command:
       - node
       - --id=n1
@@ -59,18 +79,14 @@ services:
         ipv4_address: 172.28.0.11
     ports:
       - "7001:7001"
-      - "8001:8001"
+      - "8101:8001"
     volumes:
       - ../data/docker/n1:/data
 
   n2:
-    <<: *common
+    <<: *paxos
     container_name: paxos-n2
     hostname: n2
-    environment:
-      PYTHONUNBUFFERED: "1"
-      PYTHONUTF8: "1"
-      ADMIN_PORT: "8002"
     command:
       - node
       - --id=n2
@@ -89,18 +105,14 @@ services:
         ipv4_address: 172.28.0.12
     ports:
       - "7002:7001"
-      - "8002:8001"
+      - "8102:8001"
     volumes:
       - ../data/docker/n2:/data
 
   n3:
-    <<: *common
+    <<: *paxos
     container_name: paxos-n3
     hostname: n3
-    environment:
-      PYTHONUNBUFFERED: "1"
-      PYTHONUTF8: "1"
-      ADMIN_PORT: "8003"
     command:
       - node
       - --id=n3
@@ -119,18 +131,14 @@ services:
         ipv4_address: 172.28.0.13
     ports:
       - "7003:7001"
-      - "8003:8001"
+      - "8103:8001"
     volumes:
       - ../data/docker/n3:/data
 
   n4:
-    <<: *common
+    <<: *paxos
     container_name: paxos-n4
     hostname: n4
-    environment:
-      PYTHONUNBUFFERED: "1"
-      PYTHONUTF8: "1"
-      ADMIN_PORT: "8004"
     command:
       - node
       - --id=n4
@@ -149,6 +157,6 @@ services:
         ipv4_address: 172.28.0.14
     ports:
       - "7004:7001"
-      - "8004:8001"
+      - "8104:8001"
     volumes:
       - ../data/docker/n4:/data

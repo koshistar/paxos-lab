@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    作业5 一键跑实验 + 出数据 + 出图。
+    作业5 一键跑实验 + 出表格 + 出图。
 
 .DESCRIPTION
     profile 说明：
@@ -12,11 +12,11 @@
       fsync    fsync 开/关
       batch    批处理窗口
       faults   kill/分区 等 8 个故障场景
-      all      以上全部（约 12 分钟）
+      all      以上全部（约 10~12 分钟）
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\01-run-experiments.ps1
-    powershell -ExecutionPolicy Bypass -File scripts\01-run-experiments.ps1 -Profile all -Duration 10
+    powershell -ExecutionPolicy Bypass -File scripts\01-run-experiments.ps1 -Profile all -SaveRaw -Reset
 #>
 [CmdletBinding()]
 param(
@@ -36,10 +36,10 @@ $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
+function Write-Step([string]$text) { Write-Host ''; Write-Host "=== $text ===" -ForegroundColor Cyan }
+
 $python = 'python'
 $started = Get-Date
-
-function Write-Step($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
 
 # 先确保没有残留集群（否则端口冲突，整轮白跑）
 & $python -m paxos.cli down 2>$null | Out-Null
@@ -69,13 +69,11 @@ if (-not $NoPlots) {
 }
 
 $elapsed = (Get-Date) - $started
-Write-Host @"
-
-=============================================
- 完成，用时 $([int]$elapsed.TotalMinutes) 分 $($elapsed.Seconds) 秒
- 数据： results/summary.csv  results/faults.csv
- 表格： results/tables.md
- 图表： results/figs/
-=============================================
-"@ -ForegroundColor Green
+Write-Host ''
+Write-Host '=============================================' -ForegroundColor Green
+Write-Host (" 完成，用时 {0} 分 {1} 秒" -f [int]$elapsed.TotalMinutes, $elapsed.Seconds) -ForegroundColor Green
+Write-Host ' 数据: results/summary.csv  results/faults.csv' -ForegroundColor Green
+Write-Host ' 表格: results/tables.md' -ForegroundColor Green
+Write-Host ' 图表: results/figs/' -ForegroundColor Green
+Write-Host '=============================================' -ForegroundColor Green
 Write-Host '下一步：把 results/tables.md 里的表格粘进 实验报告.md，再填上分析。' -ForegroundColor Cyan

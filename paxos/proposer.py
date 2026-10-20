@@ -399,6 +399,9 @@ class MultiPaxosProposer(Proposer):
         """
         if self.is_leader and not force and self.epoch is not None:
             return True
+        # 别人刚发过心跳 → 已经有 Leader 了，别去抢（抢了只会抬高编号、制造活锁）
+        if not force and self.node.leader_fresh():
+            return False
         for attempt in range(3):
             ballot = self.next_ballot()
             promises = await fanout(

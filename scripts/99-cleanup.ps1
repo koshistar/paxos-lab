@@ -1,13 +1,13 @@
-<#
+﻿<#
 .SYNOPSIS
     收工清理：停集群、停容器、清临时文件，并检查提交物是否齐全。
 
 .DESCRIPTION
-    打包上传前跑一遍，确保：
-      1. 没有残留进程/容器占端口；
-      2. data/ run/ __pycache__ 都清掉（.gitignore 也排除了，但本地清理更快）；
-      3. results/ 里的原始数据与图表还在（这些是提交物！）；
-      4. 报告里没有残留的【待填】。
+    打包上传前跑一遍，确认：
+      1. 没有残留进程/容器占端口
+      2. data/ run/ __pycache__ 都清掉（.gitignore 也排除了，但本地清理更快）
+      3. results/ 里的原始数据与图表还在（这些是提交物）
+      4. 报告里没有残留的【待填】
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\99-cleanup.ps1
@@ -20,24 +20,26 @@ $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 $env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 
-function Write-Step($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
-function Write-Ok($text)   { Write-Host "  [OK]   $text" -ForegroundColor Green }
-function Write-Warn2($text){ Write-Host "  [WARN] $text" -ForegroundColor Yellow }
+function Write-Step([string]$text) { Write-Host ''; Write-Host "=== $text ===" -ForegroundColor Cyan }
+function Write-Ok([string]$text)   { Write-Host "  [OK]   $text" -ForegroundColor Green }
+function Write-Warn2([string]$text){ Write-Host "  [WARN] $text" -ForegroundColor Yellow }
 
 Write-Step '1/5 停掉本地集群'
 & python -m paxos.cli down 2>$null | Out-Null
-$stale = Get-Process python -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -lt (Get-Date).AddSeconds(-5) }
-if ($stale) {
-    Write-Warn2 ("还有 $($stale.Count) 个 python 进程在跑（可能是别的程序，请自行确认）")
-} else {
-    Write-Ok '没有残留的集群进程'
-}
+Write-Ok '本地集群已停止（如本来就没跑，忽略）'
 
 Write-Step '2/5 停掉 Docker 容器'
-docker compose -f docker/docker-compose.yml down -v 2>$null | Out-Null
-if ($LASTEXITCODE -eq 0) { Write-Ok '容器已清理（如果本来就没起，忽略）' }
+$dockerOk = $true
+try { docker info --format '{{.ServerVersion}}' 2>$null | Out-Null } catch { $dockerOk = $false }
+if ($dockerOk) {
+    docker compose -f docker/docker-compose.yml down -v --remove-orphans 2>$null | Out-Null
+    Write-Ok 'Docker 容器已清理'
+} else {
+    Write-Warn2 'Docker 未运行，跳过'
+}
 
 Write-Step '3/5 清临时文件'
 if (-not $KeepData) {
@@ -55,6 +57,7 @@ if (-not $KeepData) {
 Write-Step '4/5 检查提交物'
 $required = @(
     'README.md',
+    'REPRODUCE.md',
     '实验报告.md',
     '实验操作手册.md',
     'pyproject.toml',
@@ -69,19 +72,29 @@ foreach ($item in $required) {
 if (Test-Path 'results/summary.csv') {
     $rows = (Get-Content results/summary.csv | Measure-Object -Line).Lines - 1
     Write-Ok "results/summary.csv（$rows 个用例）"
-} else { Write-Warn2 '缺少 results/summary.csv —— 先跑 scripts\01-run-experiments.ps1' }
+} else {
+    Write-Warn2 '缺少 results/summary.csv —— 先跑 scripts\01-run-experiments.ps1'
+}
 if (Test-Path 'results/faults.csv') {
     $rows = (Get-Content results/faults.csv | Measure-Object -Line).Lines - 1
     Write-Ok "results/faults.csv（$rows 个故障场景）"
-} else { Write-Warn2 '缺少 results/faults.csv —— 跑 --profile faults' }
+} else {
+    Write-Warn2 '缺少 results/faults.csv —— 跑 --profile faults'
+}
 if (Test-Path 'results/figs') {
-    $figs = (Get-ChildItem results/figs -Filter *.png).Count
+    $figs = (Get-ChildItem results/figs -Filter *.png -ErrorAction SilentlyContinue).Count
     Write-Ok "results/figs（$figs 张图）"
-} else { Write-Warn2 '缺少 results/figs —— 跑 python -m experiments.plots' }
+} else {
+    Write-Warn2 '缺少 results/figs —— 跑 python -m experiments.plots'
+}
+if (Test-Path 'screenshots') {
+    $shots = (Get-ChildItem screenshots -Recurse -Include *.png, *.jpg -ErrorAction SilentlyContinue).Count
+    if ($shots -gt 0) { Write-Ok "screenshots（$shots 张截图）" } else { Write-Warn2 'screenshots 里还没有截图（作业要求过程证据）' }
+}
 
 Write-Step '5/5 检查报告里的待填项'
 if (Test-Path '实验报告.md') {
-    $pending = (Select-String -Path '实验报告.md' -Pattern '【待填' -AllMatches).Count
+    $pending = (Select-String -Path '实验报告.md' -Pattern '待填' -AllMatches -Encoding UTF8).Count
     if ($pending -gt 0) {
         Write-Warn2 "实验报告.md 里还有 $pending 处【待填】，提交前请填完"
     } else {
@@ -89,16 +102,13 @@ if (Test-Path '实验报告.md') {
     }
 }
 
-Write-Host @"
-
-清理完毕。
-
-打包（把 学号_姓名 换成你自己的）：
-  Compress-Archive -Path * -DestinationPath ..\学号_姓名_Paxos实验.zip -Force
-
-提交前最后确认：
-  - 三种协议都跑过、data 里有 results/
-  - 报告里的数字和 results/tables.md 一致
-  - 截图齐全（screenshots/）
-
-"@ -ForegroundColor Cyan
+Write-Host ''
+Write-Host '清理完毕。' -ForegroundColor Green
+Write-Host ''
+Write-Host '打包（把 学号_姓名 换成你自己的）：' -ForegroundColor Cyan
+Write-Host '  Compress-Archive -Path * -DestinationPath ..\学号_姓名_Paxos实验.zip -Force' -ForegroundColor Cyan
+Write-Host ''
+Write-Host '提交前最后确认：' -ForegroundColor Cyan
+Write-Host '  - 三种协议都跑过，results/ 里有数据' -ForegroundColor Cyan
+Write-Host '  - 报告里的数字和 results/tables.md 一致' -ForegroundColor Cyan
+Write-Host '  - 截图齐全（screenshots/）' -ForegroundColor Cyan

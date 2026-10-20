@@ -39,7 +39,16 @@ from .learner import Learner
 from .proposer import FastPaxosProposer, MultiPaxosProposer, ProposalResult, make_proposer
 from .storage import Journal
 from .timer import enable_fine_timers
-from .transport import Counter, FaultProfile, PeerLink, decode, enable_nodelay, encode
+from .transport import (
+    MAX_ADMIN_LINE,
+    MAX_LINE,
+    Counter,
+    FaultProfile,
+    PeerLink,
+    decode,
+    enable_nodelay,
+    encode,
+)
 
 log = logging.getLogger(__name__)
 
@@ -135,7 +144,17 @@ class PaxosNode:
         self.learner_journal = Journal(data_dir / "learner.log", mode="flush")
         self.state_machine = KVStateMachine()
         self.applied_index = -1
-        self.acceptor = Acceptor(self.id, self.acceptor_journal, fsync=cfg.fsync) if not cfg.listener else None
+        self.acceptor = (
+            Acceptor(
+                self.id,
+                self.acceptor_journal,
+                fsync=cfg.fsync,
+                # 已选定的 slot 不再在全局 Phase 1 里回报（否则应答会随日志无限增长）
+                is_decided=lambda slot: slot in self.learner.chosen,
+            )
+            if not cfg.listener
+            else None
+        )
         self.learner = Learner(
             self.id,
             self.learner_journal,
@@ -260,6 +279,17 @@ class PaxosNode:
 
     def has_local_choice(self, slot: int) -> bool:
         return slot in self.learner.chosen
+
+    def leader_fresh(self, within: float | None = None) -> bool:
+        """最近是否收到过**别的节点**的心跳。
+
+        用来避免"明明有 Leader 还去参选"：参选会把提案编号抬高、顶掉现任 Leader，
+        在 n=4（quorum=3）这种"两个候选者都能凑够票"的配置下尤其容易变成选举活锁。
+        """
+        if self.leader_id is None or self.leader_id == self.id:
+            return False
+        age = self.loop_time() - self._last_heartbeat
+        return age < (self.election_timeout if within is None else within)
 
     def undecided_slots(self, limit: int = 8, min_age: float = 1.0) -> list[int]:
         """列出"已经被某些 Acceptor 接受过、但还没被选定"的 slot（空槽）。
@@ -416,6 +446,22 @@ class PaxosNode:
         ballot = Ballot.parse(msg["b"])
         self.observe_ballot(ballot)
         self._last_heartbeat = self.loop_time()
+
+        # **双主收敛**：如果我自认为是 Leader，却收到一个编号更高的 Leader 心跳，
+        # 就必须立刻让位。少了这一步会出现"两个 Leader 并存"的活锁：
+        # n=4 时 quorum=3，两个候选者可以各自凑到 3 票（自己 + 另外两台），
+        # 于是两人都当上 Leader、都用更大的编号互相顶掉、心跳互相视而不见，
+        # 实测能把 ballot 在 1 秒内顶到 1200+、85% 的请求失败。
+        # 本地 3 节点（quorum=2）很难触发，Docker 4 节点一跑就现形。
+        proposer = self.proposer
+        if isinstance(proposer, MultiPaxosProposer | FastPaxosProposer) and leader != self.id:
+            epoch = proposer.epoch
+            if proposer.is_leader and epoch is not None and ballot > epoch:
+                log.info("[%s] 收到更高编号的心跳 %s（我的 %s），让位给 %s", self.id, ballot, epoch, leader)
+                proposer.step_down(f"心跳 {ballot} 更高")
+                proposer.epoch = None
+                self.counters["step_downs"] = self.counters.get("step_downs", 0) + 1
+
         if leader != self.leader_id:
             self.leader_id = leader
             self.leader_changes += 1
@@ -637,41 +683,66 @@ class PaxosNode:
                     with contextlib.suppress(ConnectionError, OSError):
                         await writer.drain()
                 await self._read_client(reader, writer)
-        except (asyncio.TimeoutError, ConnectionError, OSError, json.JSONDecodeError):
+        except (asyncio.TimeoutError, ConnectionError, OSError, json.JSONDecodeError, ValueError):
             log.debug("[%s] 连接 %s 握手失败", self.id, peer)
         finally:
             with contextlib.suppress(Exception):
                 writer.close()
 
     async def _read_peer(self, link: PeerLink, reader: asyncio.StreamReader) -> None:
-        while not self._stop.is_set():
-            line = await reader.readline()
-            if not line:
-                return
-            self.counter.bytes_recv += len(line)
-            try:
-                msg = decode(line)
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                log.warning("[%s] 来自 %s 的报文无法解析", self.id, link.peer_id)
-                continue
-            await self._on_message(link.peer_id, msg)
+        """读同伴链路。
+
+        **必须能容忍"超长行"**：``readline()`` 在行长度超过 ``limit`` 时会抛
+        ``ValueError``（asyncio 里 ``LimitOverrunError`` 被包成了 ValueError），
+        如果没有这个 except，整条读循环会带着异常死掉、链路再也接不回来 ——
+        本工程就在 Docker 4 节点上踩过：全局 Phase 1 的应答涨到 170 KB 时，
+        四个容器接连失联，最后全员没有 Leader。
+        现在：捕获 → 记一条 warning → 正常返回（外层 finally 关掉连接，
+        dialer 会在 0.2 秒后重连）。
+        """
+        try:
+            while not self._stop.is_set():
+                line = await reader.readline()
+                if not line:
+                    return
+                self.counter.bytes_recv += len(line)
+                try:
+                    msg = decode(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    log.warning("[%s] 来自 %s 的报文无法解析", self.id, link.peer_id)
+                    continue
+                await self._on_message(link.peer_id, msg)
+        except ValueError:
+            log.warning(
+                "[%s] 来自 %s 的报文超过单行上限（%d 字节），断开并由对端重连",
+                self.id,
+                link.peer_id,
+                MAX_LINE,
+            )
+        except (ConnectionError, OSError):
+            return
 
     async def _read_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """一个客户端连接就是一个会话：请求串行处理，靠流水线量化并发。"""
-        while not self._stop.is_set():
-            line = await reader.readline()
-            if not line:
-                return
-            self.counter.bytes_recv += len(line)
-            try:
-                msg = decode(line)
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                continue
-            payload = await self._serve(str(msg.get("t")), msg)
-            rid = msg.get("rid")
-            writer.write(encode({"t": "rep", "rid": rid, "p": payload}))
-            with contextlib.suppress(ConnectionError, OSError):
-                await writer.drain()
+        try:
+            while not self._stop.is_set():
+                line = await reader.readline()
+                if not line:
+                    return
+                self.counter.bytes_recv += len(line)
+                try:
+                    msg = decode(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                payload = await self._serve(str(msg.get("t")), msg)
+                rid = msg.get("rid")
+                writer.write(encode({"t": "rep", "rid": rid, "p": payload}))
+                with contextlib.suppress(ConnectionError, OSError):
+                    await writer.drain()
+        except ValueError:
+            log.warning("[%s] 客户端报文超过单行上限，断开该连接", self.id)
+        except (ConnectionError, OSError):
+            return
 
     # ================================================================ 管理口
     async def _handle_admin(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -834,8 +905,12 @@ class PaxosNode:
     # ================================================================ 主循环
     async def run(self) -> None:
         enable_fine_timers()
-        server = await asyncio.start_server(self._handle_conn, self.cfg.listen_host, self.cfg.port, backlog=512)
-        admin = await asyncio.start_server(self._handle_admin, self.cfg.listen_host, self.cfg.admin_port, backlog=64)
+        server = await asyncio.start_server(
+            self._handle_conn, self.cfg.listen_host, self.cfg.port, backlog=512, limit=MAX_LINE
+        )
+        admin = await asyncio.start_server(
+            self._handle_admin, self.cfg.listen_host, self.cfg.admin_port, backlog=64, limit=MAX_ADMIN_LINE
+        )
         self.start_background()
         log.info(
             "[%s] 启动完成 protocol=%s port=%d admin=%d quorum=%d fast_quorum=%d fsync=%s listener=%s",

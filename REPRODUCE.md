@@ -95,15 +95,24 @@ python -m paxos.cli down
 
 ---
 
-## 4. Docker 四节点复现
+## 4. Docker 四节点复现（作业"多节点部署"部分）
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\02-docker.ps1 -Action up
+powershell -ExecutionPolicy Bypass -File scripts\02-docker.ps1 -Action up      # 4 个 healthy 容器
 powershell -ExecutionPolicy Bypass -File scripts\02-docker.ps1 -Action status
-powershell -ExecutionPolicy Bypass -File scripts\02-docker.ps1 -Action bench
+python scripts\docker_bench.py                                               # 状态 + 压测（16 并发 10 秒）
 powershell -ExecutionPolicy Bypass -File scripts\02-docker.ps1 -Action netem -DelayMs 50
+powershell -ExecutionPolicy Bypass -File scripts\02-docker.ps1 -Action clean-netem
 powershell -ExecutionPolicy Bypass -File scripts\02-docker.ps1 -Action down
 ```
+
+端口规划：容器内 Paxos 口统一 `7001`、管理口统一 `8001`（靠固定 IP `172.28.0.11~14` 区分）；
+宿主机映射为 **Paxos `7001~7004`、管理口 `8101~8104`**。
+管理口不用 `8001` 是为了避开作业4 的 `game-rank` 容器（占 8000/8001/3306/6379）。
+
+> 如果 `up` 报 `Bind for 0.0.0.0:8001 failed: port is already allocated`，
+> 说明有别的容器占着该端口：先 `docker compose -f docker/docker-compose.yml down -v --remove-orphans`，
+> 再确认 `docker ps` 里没有 `game-rank` 之类的残留。
 
 ---
 
